@@ -48,6 +48,7 @@ static fs::path get_module_directory()
 
 static bool show_disclaimer()
 {
+#if 0
     fs::path sdk_path = get_module_directory();
     if (fs::exists(sdk_path / DISCLAIMER_FLAG)) {
         return true;
@@ -78,7 +79,7 @@ static bool show_disclaimer()
         return false;
     }
     flagFile << "User accepted the license agreement.";
-
+#endif
     return true;
 }
 
