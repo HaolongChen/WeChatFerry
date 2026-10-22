@@ -100,13 +100,12 @@ static std::string get_dll_path(bool debug)
     return path.string();
 }
 extern "C" {
-__declspec(dllexport) int WxInitSDK(bool debug, int port)
+__declspec(dllexport) int WxInitSDK(bool debug, int port, int *status)
 {
     if (!show_disclaimer()) {
         exit(-1); // 用户拒绝协议，退出程序
     }
 
-    int status  = 0;
     DWORD wcPid = 0;
 
     spyDllPath = get_dll_path(debug);
@@ -114,10 +113,9 @@ __declspec(dllexport) int WxInitSDK(bool debug, int port)
         return ERROR_FILE_NOT_FOUND; // DLL 文件路径不存在
     }
 
-    status = util::open_wechat(wcPid);
-    if (status != 0) {
+    if (util::open_wechat(wcPid) != 0) {
         util::MsgBox(NULL, "打开微信失败", "WxInitSDK", 0);
-        return status;
+        return -3;
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(2)); // 等待微信打开
@@ -132,14 +130,16 @@ __declspec(dllexport) int WxInitSDK(bool debug, int port)
     pp.port           = port;
     snprintf(pp.path, MAX_PATH, "%s", fs::current_path().string().c_str());
 
-    status       = -3; // TODO: 统一错误码
+    pp.status         = status;
+    int internal_status = -3;
+
     bool success = call_dll_func_ex(wcProcess, spyDllPath, spyBase, "InitSpy", (LPVOID)&pp, sizeof(util::PortPath),
-                                    (DWORD *)&status);
-    if (!success || status != 0) {
+                                    (DWORD *)&internal_status);
+    if (!success || internal_status != 0) {
         WxDestroySDK();
     }
 
-    return status;
+    return internal_status;
 }
 
 __declspec(dllexport) int WxDestroySDK()

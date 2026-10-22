@@ -30,7 +30,7 @@ int Init(void *args)
     }
 
     LOG_INFO(msg);
-    RpcServer::getInstance().start(pp->port);
+    RpcServer::getInstance().start(pp->port, pp->status);
 
     return 0;
 }

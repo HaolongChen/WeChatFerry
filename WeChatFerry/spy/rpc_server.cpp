@@ -36,6 +36,7 @@ namespace fs = std::filesystem;
 constexpr size_t DEFAULT_BUF_SIZE = 16 * 1024 * 1024;
 
 std::unique_ptr<RpcServer, RpcServer::Deleter> RpcServer::instance_ = nullptr;
+int* RpcServer::status_ = nullptr;
 
 RpcServer &RpcServer::getInstance()
 {
@@ -51,12 +52,19 @@ void RpcServer::destroyInstance()
         instance_->stop();
         instance_.reset();
     }
+    on_destroy();
 }
 
-RpcServer::RpcServer(int port)
+void RpcServer::shutdown()
+{
+    on_shutdown();
+}
+
+RpcServer::RpcServer(int port, int *status)
     : port_(port), handler_(message::Handler::getInstance()), sender_(message::Sender::get_instance())
 {
     LOG_DEBUG("RpcServer 构造: 端口 {}", port_);
+    status_ = status;
 }
 
 RpcServer::~RpcServer()
@@ -70,13 +78,14 @@ std::string RpcServer::build_url(int port)
     return std::string(RpcServer::RPC_SERVER_ADDRESS) + ":" + std::to_string(port);
 }
 
-int RpcServer::start(int port)
+int RpcServer::start(int port, int *status)
 {
     if (isRunning_.load()) {
         LOG_WARN("RPC 服务已在运行");
         return 1;
     }
 
+    status_    = status;
     port_      = port;
     isRunning_ = true;
 
@@ -85,12 +94,14 @@ int RpcServer::start(int port)
     } catch (const std::exception &e) {
         LOG_ERROR("启动 RPC 服务器失败: {}", e.what());
         isRunning_ = false;
+        on_error();
         return -2;
     }
 #if ENABLE_WX_LOG
     handler_.EnableLog();
 #endif
     LOG_INFO("RPC 服务器成功启动，监听端口: {}", port_);
+    on_start();
     return 0;
 }
 
@@ -120,6 +131,7 @@ int RpcServer::stop()
     }
     LOG_DEBUG("消息线程已经关闭");
     LOG_INFO("RPC 服务已停止");
+    on_stop();
     return 0;
 }
 
@@ -224,7 +236,7 @@ bool RpcServer::start_message_listener(bool pyq, uint8_t *out, size_t *len)
 
 bool RpcServer::stop_message_listener(uint8_t *out, size_t *len)
 {
-    return fill_response<Functions_FUNC_DISABLE_RECV_TXT>(out, len, [&](Response &rsp) {
+    bool result = fill_response<Functions_FUNC_DISABLE_RECV_TXT>(out, len, [&](Response &rsp) {
         rsp.msg.status = handler_.UnListenMsg();
         if (rsp.msg.status >= 0) {
             handler_.UnListenPyq();
@@ -233,6 +245,11 @@ bool RpcServer::stop_message_listener(uint8_t *out, size_t *len)
             }
         }
     });
+    if (result)
+    {
+        on_stop_message_listener();
+    }
+    return result;
 }
 
 const std::unordered_map<Functions, RpcServer::FunctionHandler> RpcServer::rpcFunctionMap = {
@@ -304,6 +321,7 @@ void RpcServer::run_rpc_server()
 
     if ((rv = nng_pair1_open(&cmdSock)) != 0) {
         LOG_ERROR("nng_pair1_open error: {}", nng_strerror(rv));
+        on_error();
         return;
     }
 
@@ -311,6 +329,7 @@ void RpcServer::run_rpc_server()
         LOG_ERROR("nng_listen error: {}", nng_strerror(rv));
         nng_close(cmdSock);
         nng_fini();
+        on_error();
         return;
     }
 
@@ -318,11 +337,14 @@ void RpcServer::run_rpc_server()
         LOG_ERROR("nng_setopt_ms error: {}", nng_strerror(rv));
         nng_close(cmdSock);
         nng_fini();
+        on_error();
         return;
     }
 
     LOG_INFO("CMD Server listening on {}", url);
     std::vector<uint8_t> cmdBuffer(DEFAULT_BUF_SIZE);
+
+    on_run();
 
     while (isRunning_.load()) {
         uint8_t *in = nullptr;
@@ -331,6 +353,7 @@ void RpcServer::run_rpc_server()
         rv = nng_recv(cmdSock, &in, &in_len, NNG_FLAG_ALLOC);
         if (rv != 0) {
             LOG_ERROR("cmdSock-nng_recv error: {}", nng_strerror(rv));
+            on_error();
             break;
         }
 
@@ -351,8 +374,10 @@ void RpcServer::run_rpc_server()
             }
         } catch (const std::exception &e) {
             LOG_ERROR(util::gb2312_to_utf8(e.what()));
+            on_error();
         } catch (...) {
             LOG_ERROR("Unknown exception.");
+            on_error();
         }
 
         nng_free(in, in_len);

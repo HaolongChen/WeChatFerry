@@ -17,12 +17,13 @@ class RpcServer
 public:
     static RpcServer &getInstance();
     static void destroyInstance();
+    static void shutdown();
 
-    int start(int port = RPC_DEFAULT_PORT);
+    int start(int port = RPC_DEFAULT_PORT, int *status = nullptr);
     int stop();
 
 private:
-    RpcServer(int port = RPC_DEFAULT_PORT);
+    RpcServer(int port = RPC_DEFAULT_PORT, int *status = nullptr);
     ~RpcServer();
     RpcServer(const RpcServer &)            = delete;
     RpcServer &operator=(const RpcServer &) = delete;
@@ -41,7 +42,25 @@ private:
     static constexpr int RPC_DEFAULT_PORT           = 10086;
     static constexpr const char *RPC_SERVER_ADDRESS = "tcp://0.0.0.0";
 
+    // Status signal
+    static constexpr const int START = 1 << 0;
+    static constexpr const int RUN = 1 << 1;
+    static constexpr const int STOP = 1 << 2;
+    static constexpr const int STOP_MESSAGE_LISTENER = 1 << 3;
+    static constexpr const int SHUTDOWN = 1 << 4;
+    static constexpr const int DESTROY = 1 << 5;
+    static constexpr const int ERRORS = 1 << 6;
+
+    static void on_start() { if (status_) *status_ |= START; }
+    static void on_run() { if (status_) *status_ |= RUN; }
+    static void on_stop() { if (status_) *status_ |= STOP; }
+    static void on_stop_message_listener() { if (status_) *status_ |= STOP_MESSAGE_LISTENER; }
+    static void on_shutdown() { if (status_) *status_ |= SHUTDOWN; }
+    static void on_destroy() { if (status_) *status_ |= DESTROY; }
+    static void on_error() { if (status_) *status_ |= ERRORS; }
+
     int port_ = RPC_DEFAULT_PORT;
+    static int* status_;
     std::atomic<bool> isRunning_ { false };
     std::thread cmdThread_;
     std::thread msgThread_;
